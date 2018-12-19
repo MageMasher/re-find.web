@@ -79,11 +79,15 @@
             applied to arguments must be equal to the given return value. This
             option only has effect when arguments are provided."]]])
 
+(def placeholders [{:args "#\"re-find\" \">>> re-find <<<\""
+                    :ret "\"re-find\""
+                    :exact-ret-match? true}])
+
 (def init-state {:args ""
                  :ret ""
                  :exact-ret-match? nil
                  :help false
-                 :copy-text "Click to copy"})
+                 :placeholders (first placeholders)})
 
 (defonce app-state (r/atom init-state))
 (defonce delayed-state (r/atom init-state))
@@ -130,8 +134,7 @@
 
 (defn sync-address-bar []
   (let [link (shareable-link @app-state)]
-    (when (and (not= init-state @app-state)
-               (not= link (.. js/window -location -href)))
+    (when true #_(not= link (.. js/window -location -href))
       (.replaceState js/window.history nil "" link))))
 
 (r/track! sync-address-bar)
@@ -162,9 +165,17 @@
   (apply f (apply concat (butlast args) (last args))))
 
 (defn search-results []
-  (let [{:keys [:args :ret :exact-ret-match? :permutations?]} @delayed-state
-        args* (when-not (str/blank? args) (eval-str args))
-        ret* (when-not (str/blank? ret) (eval-str ret))
+  (let [{:keys [:args :ret :exact-ret-match? :permutations?
+                :placeholders]} @delayed-state
+        from-placeholder? (and (empty? args)
+                               (empty? ret))
+        [args* ret*] (if from-placeholder?
+                       [(eval-str (:args placeholders))
+                        (eval-str (:ret placeholders))]
+                       [(when-not (str/blank? args)
+                          (eval-str args))
+                        (when-not (str/blank? ret)
+                          (eval-str ret))])
         args-permutations (when-not (= ::invalid args*)
                             (if permutations? (permutations args*) [args*]))
         results
@@ -190,6 +201,7 @@
                   args-permutations))]
     (when (seq results)
       [:table.table
+       {:style {:opacity (if from-placeholder? "0.4" "1")}}
        [:thead
         [:tr
          [:th "function"]
@@ -205,7 +217,8 @@
             [:td (print-10 ret-val)]]))]])))
 
 (defn app []
-  (let [{:keys [:args :ret :exact-ret-match? :help :permutations?]} @app-state]
+  (let [{:keys [:args :ret :exact-ret-match? :help :permutations?
+                :placeholders]} @app-state]
     [:div.container
      #_[:pre (pr-str @app-state)]
      [:div.jumbotron
@@ -227,7 +240,7 @@
        [:label.col-md-2.col-sm-3.col-form-label {:for "args"} "Arguments"]
        [:div.col-md-7.col-sm-6
         [:input#args.form-control.mono
-         {:placeholder "inc [1 2 3]"
+         {:placeholder (:args placeholders)
           :value args
           :on-change #(swap! app-state assoc :args (.. % -target -value))}]]
        (let [perms-disabled? (str/blank? (str/trim args))]
@@ -236,6 +249,7 @@
            :on-click #(when-not perms-disabled?
                         (swap! app-state update :permutations? not)
                         (swap! delayed-state update :permutations? not))}
+          ;; TODO: when placeholder-mode, get checked from placeholder
           [:input#exact {:type "checkbox"
                          :disabled perms-disabled?
                          :checked permutations?
@@ -249,7 +263,7 @@
        [:label.col-md-2.col-sm-3.col-form-label {:for "ret"} "Returns"]
        [:div.col-md-7.col-sm-6
         [:input#ret.form-control.mono
-         {:placeholder "[2 3 4]"
+         {:placeholder (:ret placeholders)
           :value ret
           :on-change #(swap! app-state assoc :ret (.. % -target -value))}]]
        (let [exact-disabled? (or
